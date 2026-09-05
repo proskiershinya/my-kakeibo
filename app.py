@@ -1,57 +1,55 @@
 import streamlit as st
 import pandas as pd
-import gspread
 from datetime import datetime
+from streamlit_gsheets import GSheetsConnection
 
 # ページ設定
 st.set_page_config(page_title="お金管理システム", layout="wide")
 
 # スプレッドシートID
 SPREADSHEET_ID = "1bMVc-6f0SdNfpMYJV9pkdFgXhKtm-k6PQe-JdRxDwY0"
+SPREADSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit"
 
-# GSpreadクライアント接続（鍵整形処理付き）
+# GSheets コネクションの初期化
 @st.cache_resource
-def get_gspread_client():
+def get_connection():
     try:
-        creds = dict(st.secrets["gcp_service_account"])
-        
-        # エスケープされた改行文字列を実際の改行に置換
-        if "private_key" in creds:
-            creds["private_key"] = creds["private_key"].replace("\\n", "\n")
-            
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        gc_client = gspread.service_account_from_dict(creds, scopes=scopes)
-        return gc_client
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        return conn
     except Exception as e:
-        st.error(f"Google Cloud認証設定エラー: {type(e).__name__} - {e}")
+        st.error(f"接続エラー: {e}")
         return None
 
-gc = get_gspread_client()
+conn = get_connection()
 
 # データ取得関数
 def load_sheet_data(sheet_name):
-    if gc is None:
+    if conn is None:
         return pd.DataFrame()
     try:
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        worksheet = sh.worksheet(sheet_name)
-        data = worksheet.get_all_records()
-        return pd.DataFrame(data)
+        df = conn.read(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, ttl=0)
+        return df.dropna(how="all")
     except Exception as e:
         return pd.DataFrame()
 
 # データ追加関数
 def append_row_to_sheet(sheet_name, row_data):
-    if gc is None:
-        st.error("Google API接続が完了していません。Secrets設定を確認してください。")
+    if conn is None:
+        st.error("Google API接続が完了していません。")
         return False
     try:
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        worksheet = sh.worksheet(sheet_name)
-        worksheet.append_row(row_data)
+        # 現在のデータを取得
+        existing_df = load_sheet_data(sheet_name)
+        
+        # 新しい行をデータフレームとして追加
+        if not existing_df.empty:
+            new_df = pd.DataFrame([row_data], columns=existing_df.columns)
+            updated_df = pd.concat([existing_df, new_df], ignore_index=True)
+        else:
+            updated_df = pd.DataFrame([row_data])
+            
+        # スプレッドシートを更新
+        conn.update(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, data=updated_df)
         return True
     except Exception as e:
         st.error(f"スプレッドシート書き込みエラー: {type(e).__name__} - {e}")
