@@ -3,6 +3,8 @@ import pandas as pd
 import datetime
 import holidays
 
+SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1bMVc-6f0SdNfpMYJV9pkdFgXhKtm-k6PQe-JdRxDwY0/edit?gid=0#gid=0"
+
 # 1. パスワード認証機能（閉じた時・リロード時にロック）
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
