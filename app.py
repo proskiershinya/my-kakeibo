@@ -10,6 +10,14 @@ st.set_page_config(page_title="お金管理システム", layout="wide")
 SPREADSHEET_ID = "1bMVc-6f0SdNfpMYJV9pkdFgXhKtm-k6PQe-JdRxDwY0"
 SPREADSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit"
 
+# 固定ヘッダー定義
+HEADERS = {
+    "accounts": ["口座名", "開始日", "初期残高"],
+    "cards": ["カード名", "締め日", "引き落とし口座", "引き落とし日"],
+    "jobs": ["収入元名称", "締め日", "給料振込日", "時給・単価"],
+    "transactions": ["日付", "区分", "勘定科目", "金額", "利用口座", "使用カード", "ステータス", "メモ"]
+}
+
 # GSheets コネクションの初期化
 @st.cache_resource
 def get_connection():
@@ -25,37 +33,48 @@ conn = get_connection()
 # データ取得関数
 def load_sheet_data(sheet_name):
     if conn is None:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=HEADERS[sheet_name])
     try:
         df = conn.read(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, ttl=0)
-        return df.dropna(how="all")
-    except Exception as e:
-        return pd.DataFrame()
+        df = df.dropna(how="all")
+        # ヘッダーを正しく保証する処理
+        if df.empty or list(df.columns) != HEADERS[sheet_name]:
+            # もしヘッダーが無い状態なら正しいカラム名を割り当てる
+            if len(df.columns) == len(HEADERS[sheet_name]):
+                df.columns = HEADERS[sheet_name]
+            else:
+                return pd.DataFrame(columns=HEADERS[sheet_name])
+        return df
+    except Exception:
+        return pd.DataFrame(columns=HEADERS[sheet_name])
 
-# データ全更新関数（編集・削除用）
+# データ全更新関数（ヘッダー保持型）
 def update_sheet_data(sheet_name, updated_df):
     if conn is None:
         st.error("Google API接続が完了していません。")
         return False
     try:
+        # ヘッダー名を正しく揃えて更新
+        updated_df.columns = HEADERS[sheet_name]
         conn.update(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, data=updated_df)
         return True
     except Exception as e:
         st.error(f"スプレッドシート更新エラー: {type(e).__name__} - {e}")
         return False
 
-# データ追加関数
+# データ追加関数（ヘッダー保護型）
 def append_row_to_sheet(sheet_name, row_data):
     if conn is None:
         st.error("Google API接続が完了していません。")
         return False
     try:
         existing_df = load_sheet_data(sheet_name)
+        new_row_df = pd.DataFrame([row_data], columns=HEADERS[sheet_name])
+        
         if not existing_df.empty:
-            new_df = pd.DataFrame([row_data], columns=existing_df.columns)
-            updated_df = pd.concat([existing_df, new_df], ignore_index=True)
+            updated_df = pd.concat([existing_df, new_row_df], ignore_index=True)
         else:
-            updated_df = pd.DataFrame([row_data])
+            updated_df = new_row_df
             
         conn.update(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, data=updated_df)
         return True
@@ -152,19 +171,16 @@ with tab2:
     st.subheader("📋 登録済み取引履歴の編集・修正 (transactions)")
     st.caption("※表の中を直接クリックして数値を変更したり、行を選択して削除できます。変更後は「変更を保存する」を押してください。")
     
-    if not df_transactions.empty:
-        edited_transactions = st.data_editor(
-            df_transactions,
-            num_rows="dynamic",
-            use_container_width=True,
-            key="editor_transactions"
-        )
-        if st.button("取引データの変更を保存する", type="primary"):
-            if update_sheet_data("transactions", edited_transactions):
-                st.success("取引データを更新しました！")
-                st.rerun()
-    else:
-        st.info("現在登録されている取引データはありません。")
+    edited_transactions = st.data_editor(
+        df_transactions,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="editor_transactions"
+    )
+    if st.button("取引データの変更を保存する", type="primary"):
+        if update_sheet_data("transactions", edited_transactions):
+            st.success("取引データを更新しました！")
+            st.rerun()
 
 # ----------------------------------------------------
 # タブ3: 確定申告まとめ（やよい連動）
@@ -185,7 +201,7 @@ with tab4:
     with st.form("account_form", clear_on_submit=True):
         col_a1, col_a2, col_a3 = st.columns(3)
         with col_a1:
-            new_acc_name = st.text_input("口座名", placeholder="例: 東邦銀行, 楽天銀行")
+            new_acc_name = st.text_input("口座名", placeholder="例: 東邦銀行_個人, 楽天銀行")
         with col_a2:
             new_acc_date = st.date_input("開始日", value=datetime.today())
         with col_a3:
@@ -202,12 +218,11 @@ with tab4:
                 st.error("口座名を入力してください。")
 
     st.write("**口座マスターデータの編集・修正**")
-    if not df_accounts.empty:
-        edited_accounts = st.data_editor(df_accounts, num_rows="dynamic", use_container_width=True, key="editor_accounts")
-        if st.button("口座マスターの変更を保存する"):
-            if update_sheet_data("accounts", edited_accounts):
-                st.success("口座マスターを更新しました！")
-                st.rerun()
+    edited_accounts = st.data_editor(df_accounts, num_rows="dynamic", use_container_width=True, key="editor_accounts")
+    if st.button("口座マスターの変更を保存する"):
+        if update_sheet_data("accounts", edited_accounts):
+            st.success("口座マスターを更新しました！")
+            st.rerun()
 
     st.markdown("---")
     # 2. カードマスター
@@ -234,12 +249,11 @@ with tab4:
                 st.error("カード名を入力してください。")
 
     st.write("**カードマスターデータの編集・修正**")
-    if not df_cards.empty:
-        edited_cards = st.data_editor(df_cards, num_rows="dynamic", use_container_width=True, key="editor_cards")
-        if st.button("カードマスターの変更を保存する"):
-            if update_sheet_data("cards", edited_cards):
-                st.success("カードマスターを更新しました！")
-                st.rerun()
+    edited_cards = st.data_editor(df_cards, num_rows="dynamic", use_container_width=True, key="editor_cards")
+    if st.button("カードマスターの変更を保存する"):
+        if update_sheet_data("cards", edited_cards):
+            st.success("カードマスターを更新しました！")
+            st.rerun()
 
     st.markdown("---")
     # 3. 収入元マスター
@@ -266,9 +280,8 @@ with tab4:
                 st.error("収入元名称を入力してください。")
 
     st.write("**収入元マスターデータの編集・修正**")
-    if not df_jobs.empty:
-        edited_jobs = st.data_editor(df_jobs, num_rows="dynamic", use_container_width=True, key="editor_jobs")
-        if st.button("収入元マスターの変更を保存する"):
-            if update_sheet_data("jobs", edited_jobs):
-                st.success("収入元マスターを更新しました！")
-                st.rerun()
+    edited_jobs = st.data_editor(df_jobs, num_rows="dynamic", use_container_width=True, key="editor_jobs")
+    if st.button("収入元マスターの変更を保存する"):
+        if update_sheet_data("jobs", edited_jobs):
+            st.success("収入元マスターを更新しました！")
+            st.rerun()
