@@ -11,16 +11,25 @@ SPREADSHEET_ID = "1bMVc-6f0SdNfpMYJV9pkdFgXhKtm-k6PQe-JdRxDwY0"
 
 # GSpreadクライアント接続（Secrets認証）
 @st.cache_resource
+# GSpreadクライアント接続（Secrets認証の最適化版）
+@st.cache_resource
 def get_gspread_client():
     try:
-        credentials = dict(st.secrets["gcp_service_account"])
-        gc = gspread.service_account_from_dict(credentials)
+        # SecretsからDict形式で取得
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        # 改行コードの変換を明示的に処理
+        if "private_key" in creds_dict:
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        gc = gspread.service_account_from_dict(creds_dict, scopes=scopes)
         return gc
     except Exception as e:
         st.error(f"Google Cloud認証設定エラー: {type(e).__name__} - {e}")
         return None
-
-gc = get_gspread_client()
 
 # データ取得関数
 def load_sheet_data(sheet_name):
