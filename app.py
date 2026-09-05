@@ -9,26 +9,21 @@ st.set_page_config(page_title="お金管理システム", layout="wide")
 # スプレッドシートID
 SPREADSHEET_ID = "1bMVc-6f0SdNfpMYJV9pkdFgXhKtm-k6PQe-JdRxDwY0"
 
-# GSpreadクライアント接続（Secrets認証の最適化）
+# GSpreadクライアント接続（シンプル認証版）
 @st.cache_resource
 def get_gspread_client():
     try:
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        # private_key 内の \n 文字列を正しい改行コードに変換
-        if "private_key" in creds_dict:
-            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-            
+        creds = st.secrets["gcp_service_account"]
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive"
         ]
-        gc_client = gspread.service_account_from_dict(creds_dict, scopes=scopes)
+        gc_client = gspread.service_account_from_dict(creds, scopes=scopes)
         return gc_client
     except Exception as e:
         st.error(f"Google Cloud認証設定エラー: {type(e).__name__} - {e}")
         return None
 
-# 変数定義（これを関数の外で呼ぶ必要があります）
 gc = get_gspread_client()
 
 # データ取得関数
