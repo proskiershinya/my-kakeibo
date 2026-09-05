@@ -1,21 +1,52 @@
 import streamlit as st
 import pandas as pd
+import gspread
 from datetime import datetime
 
-# ページ基本設定
+# ページ設定
 st.set_page_config(page_title="お金管理システム", layout="wide")
 
-# スプレッドシートID設定
-SHEET_ID = "1bMVc-6f0SdNfpMYJV9pkdFgXhKtm-k6PQe-JdRxDwY0"
+# スプレッドシートID
+SPREADSHEET_ID = "1bMVc-6f0SdNfpMYJV9pkdFgXhKtm-k6PQe-JdRxDwY0"
 
-# データ読み込み関数
-def load_data(sheet_name):
-    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+# GSpreadクライアント接続（Secrets認証）
+@st.cache_resource
+def get_gspread_client():
     try:
-        df = pd.read_csv(url)
-        return df
+        credentials = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(credentials)
+        return gc
+    except Exception as e:
+        st.error(f"Google Cloud認証エラー: {e}")
+        return None
+
+gc = get_gspread_client()
+
+# データ取得関数
+def load_sheet_data(sheet_name):
+    if gc is None:
+        return pd.DataFrame()
+    try:
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        worksheet = sh.worksheet(sheet_name)
+        data = worksheet.get_all_records()
+        return pd.DataFrame(data)
     except Exception as e:
         return pd.DataFrame()
+
+# データ追加関数
+def append_row_to_sheet(sheet_name, row_data):
+    if gc is None:
+        st.error("Google API接続が完了していません。")
+        return False
+    try:
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        worksheet = sh.worksheet(sheet_name)
+        worksheet.append_row(row_data)
+        return True
+    except Exception as e:
+        st.error(f"スプレッドシート書き込みエラー: {e}")
+        return False
 
 # パスワード認証
 if "authenticated" not in st.session_state:
@@ -34,7 +65,7 @@ if not st.session_state.authenticated:
 
 # サイドバー
 st.sidebar.title("💰 お金管理システム")
-st.sidebar.caption("Google Sheets 連動版")
+st.sidebar.caption("Google Sheets リアルタイム連動中")
 if st.sidebar.button("ログアウト"):
     st.session_state.authenticated = False
     st.rerun()
@@ -47,18 +78,18 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "⚙️ マスター設定"
 ])
 
-# データを事前に読み込み
-df_accounts = load_data("accounts")
-df_cards = load_data("cards")
-df_jobs = load_data("jobs")
-df_transactions = load_data("transactions")
+# データロード
+df_accounts = load_sheet_data("accounts")
+df_cards = load_sheet_data("cards")
+df_jobs = load_sheet_data("jobs")
+df_transactions = load_sheet_data("transactions")
 
 # ----------------------------------------------------
 # タブ1: 日次の残高予測
 # ----------------------------------------------------
 with tab1:
     st.header("📊 日次の残高予測")
-    st.caption("登録済みの口座情報および取引データをもとに残高予測を表示します。")
+    st.caption("スプレッドシートの登録口座・取引データをもとに表示します。")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -74,8 +105,8 @@ with tab1:
 with tab2:
     st.header("✏️ 取引（入出金・予定）の入力")
     
-    account_options = df_accounts["口座名"].dropna().tolist() if not df_accounts.empty and "口座名" in df_accounts.columns else ["現金", "銀行口座"]
-    card_options = df_cards["カード名"].dropna().tolist() if not df_cards.empty and "カード名" in df_cards.columns else ["なし"]
+    account_options = df_accounts["口座名"].tolist() if not df_accounts.empty and "口座名" in df_accounts.columns else ["現金"]
+    card_options = df_cards["カード名"].tolist() if not df_cards.empty and "カード名" in df_cards.columns else ["なし"]
     
     with st.form("transaction_form", clear_on_submit=True):
         st.subheader("📝 新規取引の追加")
@@ -93,11 +124,14 @@ with tab2:
             
         with c3:
             tx_status = st.selectbox("ステータス", ["予定", "確定"])
-            tx_memo = st.text_area("メモ・詳細", placeholder="摘要や取引内容を入力")
+            tx_memo = st.text_area("メモ・詳細")
             
-        submitted_tx = st.form_submit_button("取引を記録する", type="primary")
+        submitted_tx = st.form_submit_button("取引を保存する", type="primary")
         if submitted_tx:
-            st.success("取引データを受け付けました！（※スプレッドシートへの直接追加機能は準備中）")
+            new_row = [str(tx_date), tx_type, tx_category, tx_amount, tx_account, tx_card, tx_status, tx_memo]
+            if append_row_to_sheet("transactions", new_row):
+                st.success("取引データをスプレッドシートに保存しました！")
+                st.rerun()
 
     st.markdown("---")
     st.subheader("📋 登録済み取引履歴 (transactions)")
@@ -108,18 +142,14 @@ with tab2:
 # ----------------------------------------------------
 with tab3:
     st.header("📋 確定申告まとめ（やよいの青色申告 連動）")
-    st.info("確定データの集計結果および弥生会計インポート用インポートデータの出力画面です。")
-    if not df_transactions.empty:
-        st.dataframe(df_transactions, use_container_width=True)
-    else:
-        st.warning("現在表示できる確定取引データがありません。")
+    st.info("スプレッドシート内の確定取引データ一覧を表示しています。")
+    st.dataframe(df_transactions, use_container_width=True)
 
 # ----------------------------------------------------
 # タブ4: マスター設定
 # ----------------------------------------------------
 with tab4:
     st.header("⚙️ マスター設定（口座・カード・収入元）")
-    st.caption("ここで登録・編集した設定情報がアプリ全体の計算・選択肢に使用されます。")
     
     st.subheader("1. 口座マスター設定")
     with st.form("account_form", clear_on_submit=True):
@@ -131,10 +161,13 @@ with tab4:
         with col_a3:
             new_acc_bal = st.number_input("初期残高（円）", value=0, step=10000)
             
-        submit_acc = st.form_submit_button("口座を追加")
+        submit_acc = st.form_submit_button("口座をスプレッドシートに追加")
         if submit_acc:
             if new_acc_name:
-                st.success(f"口座「{new_acc_name}」を入力しました。")
+                new_row = [new_acc_name, str(new_acc_date), new_acc_bal]
+                if append_row_to_sheet("accounts", new_row):
+                    st.success(f"口座「{new_acc_name}」を保存しました！")
+                    st.rerun()
             else:
                 st.error("口座名を入力してください。")
 
@@ -154,10 +187,13 @@ with tab4:
         with col_c4:
             new_card_pay_day = st.number_input("引き落とし日（1〜31）", min_value=1, max_value=31, value=10)
             
-        submit_card = st.form_submit_button("カードを追加")
+        submit_card = st.form_submit_button("カードをスプレッドシートに追加")
         if submit_card:
             if new_card_name:
-                st.success(f"カード「{new_card_name}」を入力しました。")
+                new_row = [new_card_name, new_card_close, new_card_pay_acc, new_card_pay_day]
+                if append_row_to_sheet("cards", new_row):
+                    st.success(f"カード「{new_card_name}」を保存しました！")
+                    st.rerun()
             else:
                 st.error("カード名を入力してください。")
 
@@ -177,10 +213,13 @@ with tab4:
         with col_j4:
             new_job_wage = st.number_input("時給・単価（円）", value=1000, step=50)
             
-        submit_job = st.form_submit_button("収入元を追加")
+        submit_job = st.form_submit_button("収入元をスプレッドシートに追加")
         if submit_job:
             if new_job_name:
-                st.success(f"収入元「{new_job_name}」を入力しました。")
+                new_row = [new_job_name, new_job_close, new_job_pay_day, new_job_wage]
+                if append_row_to_sheet("jobs", new_row):
+                    st.success(f"収入元「{new_job_name}」を保存しました！")
+                    st.rerun()
             else:
                 st.error("収入元名称を入力してください。")
 
