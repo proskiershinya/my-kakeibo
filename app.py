@@ -17,7 +17,7 @@ def get_gspread_client():
         gc = gspread.service_account_from_dict(credentials)
         return gc
     except Exception as e:
-        st.error(f"Google Cloud認証エラー: {e}")
+        st.error(f"Google Cloud認証設定エラー: {type(e).__name__} - {e}")
         return None
 
 gc = get_gspread_client()
@@ -34,10 +34,10 @@ def load_sheet_data(sheet_name):
     except Exception as e:
         return pd.DataFrame()
 
-# データ追加関数
+# データ追加関数（詳細エラー表示版）
 def append_row_to_sheet(sheet_name, row_data):
     if gc is None:
-        st.error("Google API接続が完了していません。")
+        st.error("Google API接続が完了していません。Secrets設定を確認してください。")
         return False
     try:
         sh = gc.open_by_key(SPREADSHEET_ID)
@@ -45,7 +45,7 @@ def append_row_to_sheet(sheet_name, row_data):
         worksheet.append_row(row_data)
         return True
     except Exception as e:
-        st.error(f"スプレッドシート書き込みエラー: {e}")
+        st.error(f"スプレッドシート書き込みエラー: {type(e).__name__} - {e}")
         return False
 
 # パスワード認証
@@ -209,7 +209,7 @@ with tab4:
         with col_j2:
             new_job_close = st.number_input("締め日（日）", min_value=1, max_value=31, value=30)
         with col_j3:
-            new_job_pay_day = st.number_input("給与支給日（日）", min_value=1, max_value=31, value=25)
+            new_job_pay_day = st.number_input("給料振込日（日）", min_value=1, max_value=31, value=25)
         with col_j4:
             new_job_wage = st.number_input("時給・単価（円）", value=1000, step=50)
             
