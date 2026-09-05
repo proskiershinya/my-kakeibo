@@ -9,15 +9,12 @@ st.set_page_config(page_title="お金管理システム", layout="wide")
 # スプレッドシートID
 SPREADSHEET_ID = "1bMVc-6f0SdNfpMYJV9pkdFgXhKtm-k6PQe-JdRxDwY0"
 
-# GSpreadクライアント接続（Secrets認証）
-@st.cache_resource
-# GSpreadクライアント接続（Secrets認証の最適化版）
+# GSpreadクライアント接続（Secrets認証の最適化）
 @st.cache_resource
 def get_gspread_client():
     try:
-        # SecretsからDict形式で取得
         creds_dict = dict(st.secrets["gcp_service_account"])
-        # 改行コードの変換を明示的に処理
+        # private_key 内の \n 文字列を正しい改行コードに変換
         if "private_key" in creds_dict:
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
             
@@ -25,11 +22,14 @@ def get_gspread_client():
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive"
         ]
-        gc = gspread.service_account_from_dict(creds_dict, scopes=scopes)
-        return gc
+        gc_client = gspread.service_account_from_dict(creds_dict, scopes=scopes)
+        return gc_client
     except Exception as e:
         st.error(f"Google Cloud認証設定エラー: {type(e).__name__} - {e}")
         return None
+
+# 変数定義（これを関数の外で呼ぶ必要があります）
+gc = get_gspread_client()
 
 # データ取得関数
 def load_sheet_data(sheet_name):
@@ -43,7 +43,7 @@ def load_sheet_data(sheet_name):
     except Exception as e:
         return pd.DataFrame()
 
-# データ追加関数（詳細エラー表示版）
+# データ追加関数
 def append_row_to_sheet(sheet_name, row_data):
     if gc is None:
         st.error("Google API接続が完了していません。Secrets設定を確認してください。")
