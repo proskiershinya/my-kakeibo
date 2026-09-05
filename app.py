@@ -9,12 +9,16 @@ st.set_page_config(page_title="お金管理システム", layout="wide")
 # スプレッドシートID
 SPREADSHEET_ID = "1bMVc-6f0SdNfpMYJV9pkdFgXhKtm-k6PQe-JdRxDwY0"
 
-# GSpreadクライアント接続（公式標準認証）
+# GSpreadクライアント接続（鍵整形処理付き）
 @st.cache_resource
 def get_gspread_client():
     try:
-        # Secretsの辞書データをそのまま渡す
-        creds = st.secrets["gcp_service_account"]
+        creds = dict(st.secrets["gcp_service_account"])
+        
+        # エスケープされた改行文字列を実際の改行に置換
+        if "private_key" in creds:
+            creds["private_key"] = creds["private_key"].replace("\\n", "\n")
+            
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive"
