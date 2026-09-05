@@ -37,9 +37,7 @@ def load_sheet_data(sheet_name):
     try:
         df = conn.read(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, ttl=0)
         df = df.dropna(how="all")
-        # ヘッダーを正しく保証する処理
         if df.empty or list(df.columns) != HEADERS[sheet_name]:
-            # もしヘッダーが無い状態なら正しいカラム名を割り当てる
             if len(df.columns) == len(HEADERS[sheet_name]):
                 df.columns = HEADERS[sheet_name]
             else:
@@ -54,7 +52,6 @@ def update_sheet_data(sheet_name, updated_df):
         st.error("Google API接続が完了していません。")
         return False
     try:
-        # ヘッダー名を正しく揃えて更新
         updated_df.columns = HEADERS[sheet_name]
         conn.update(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, data=updated_df)
         return True
@@ -119,18 +116,55 @@ df_jobs = load_sheet_data("jobs")
 df_transactions = load_sheet_data("transactions")
 
 # ----------------------------------------------------
-# タブ1: 日次の残高予測
+# タブ1: 日次の残高予測（自動集計・計算ロジック）
 # ----------------------------------------------------
 with tab1:
-    st.header("📊 日次の残高予測")
-    st.caption("スプレッドシートの登録口座・取引データをもとに表示します。")
+    st.header("📊 口座残高・集計ダッシュボード")
     
+    # 口座別の現在残高計算
+    if not df_accounts.empty:
+        acc_summary = []
+        
+        for _, acc in df_accounts.iterrows():
+            acc_name = acc["口座名"]
+            try:
+                init_bal = float(acc["初期残高"])
+            except (ValueError, TypeError):
+                init_bal = 0.0
+                
+            # 該当口座の確定取引を集計
+            if not df_transactions.empty and "利用口座" in df_transactions.columns:
+                tx_acc = df_transactions[(df_transactions["利用口座"] == acc_name) & (df_transactions["ステータス"] == "確定")]
+                
+                income = pd.to_numeric(tx_acc[tx_acc["区分"] == "収入"]["金額"], errors="coerce").sum()
+                expense = pd.to_numeric(tx_acc[tx_acc["区分"] == "支出"]["金額"], errors="coerce").sum()
+            else:
+                income = 0.0
+                expense = 0.0
+                
+            current_bal = init_bal + income - expense
+            acc_summary.append({
+                "口座名": acc_name,
+                "初期残高": f"{int(init_bal):,}円",
+                "収入合計(確定)": f"{int(income):,}円",
+                "支出合計(確定)": f"{int(expense):,}円",
+                "現在の計算残高": f"{int(current_bal):,}円"
+            })
+            
+        df_summary = pd.DataFrame(acc_summary)
+        
+        st.subheader("🏦 口座別 現在残高サマリー")
+        st.dataframe(df_summary, use_container_width=True)
+    else:
+        st.info("マスター設定から口座を登録してください。")
+
+    st.markdown("---")
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("🏦 現在の登録口座一覧")
+        st.subheader("🏦 口座マスター一覧")
         st.dataframe(df_accounts, use_container_width=True)
     with col2:
-        st.subheader("💳 登録カード一覧")
+        st.subheader("💳 カードマスター一覧")
         st.dataframe(df_cards, use_container_width=True)
 
 # ----------------------------------------------------
