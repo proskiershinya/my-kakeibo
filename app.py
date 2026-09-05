@@ -32,23 +32,31 @@ def load_sheet_data(sheet_name):
     except Exception as e:
         return pd.DataFrame()
 
+# データ全更新関数（編集・削除用）
+def update_sheet_data(sheet_name, updated_df):
+    if conn is None:
+        st.error("Google API接続が完了していません。")
+        return False
+    try:
+        conn.update(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, data=updated_df)
+        return True
+    except Exception as e:
+        st.error(f"スプレッドシート更新エラー: {type(e).__name__} - {e}")
+        return False
+
 # データ追加関数
 def append_row_to_sheet(sheet_name, row_data):
     if conn is None:
         st.error("Google API接続が完了していません。")
         return False
     try:
-        # 現在のデータを取得
         existing_df = load_sheet_data(sheet_name)
-        
-        # 新しい行をデータフレームとして追加
         if not existing_df.empty:
             new_df = pd.DataFrame([row_data], columns=existing_df.columns)
             updated_df = pd.concat([existing_df, new_df], ignore_index=True)
         else:
             updated_df = pd.DataFrame([row_data])
             
-        # スプレッドシートを更新
         conn.update(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, data=updated_df)
         return True
     except Exception as e:
@@ -110,7 +118,7 @@ with tab1:
 # タブ2: 取引入力＆予定・確定管理
 # ----------------------------------------------------
 with tab2:
-    st.header("✏️ 取引（入出金・予定）の入力")
+    st.header("✏️ 取引（入出金・予定）の入力・編集")
     
     account_options = df_accounts["口座名"].tolist() if not df_accounts.empty and "口座名" in df_accounts.columns else ["現金"]
     card_options = df_cards["カード名"].tolist() if not df_cards.empty and "カード名" in df_cards.columns else ["なし"]
@@ -141,8 +149,22 @@ with tab2:
                 st.rerun()
 
     st.markdown("---")
-    st.subheader("📋 登録済み取引履歴 (transactions)")
-    st.dataframe(df_transactions, use_container_width=True)
+    st.subheader("📋 登録済み取引履歴の編集・修正 (transactions)")
+    st.caption("※表の中を直接クリックして数値を変更したり、行を選択して削除できます。変更後は「変更を保存する」を押してください。")
+    
+    if not df_transactions.empty:
+        edited_transactions = st.data_editor(
+            df_transactions,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="editor_transactions"
+        )
+        if st.button("取引データの変更を保存する", type="primary"):
+            if update_sheet_data("transactions", edited_transactions):
+                st.success("取引データを更新しました！")
+                st.rerun()
+    else:
+        st.info("現在登録されている取引データはありません。")
 
 # ----------------------------------------------------
 # タブ3: 確定申告まとめ（やよい連動）
@@ -158,6 +180,7 @@ with tab3:
 with tab4:
     st.header("⚙️ マスター設定（口座・カード・収入元）")
     
+    # 1. 口座マスター
     st.subheader("1. 口座マスター設定")
     with st.form("account_form", clear_on_submit=True):
         col_a1, col_a2, col_a3 = st.columns(3)
@@ -168,7 +191,7 @@ with tab4:
         with col_a3:
             new_acc_bal = st.number_input("初期残高（円）", value=0, step=10000)
             
-        submit_acc = st.form_submit_button("口座をスプレッドシートに追加")
+        submit_acc = st.form_submit_button("口座を追加")
         if submit_acc:
             if new_acc_name:
                 new_row = [new_acc_name, str(new_acc_date), new_acc_bal]
@@ -178,10 +201,16 @@ with tab4:
             else:
                 st.error("口座名を入力してください。")
 
-    st.write("**現在の口座マスターデータ (accounts)**")
-    st.dataframe(df_accounts, use_container_width=True)
+    st.write("**口座マスターデータの編集・修正**")
+    if not df_accounts.empty:
+        edited_accounts = st.data_editor(df_accounts, num_rows="dynamic", use_container_width=True, key="editor_accounts")
+        if st.button("口座マスターの変更を保存する"):
+            if update_sheet_data("accounts", edited_accounts):
+                st.success("口座マスターを更新しました！")
+                st.rerun()
 
     st.markdown("---")
+    # 2. カードマスター
     st.subheader("2. クレジットカードマスター設定")
     with st.form("card_form", clear_on_submit=True):
         col_c1, col_c2, col_c3, col_c4 = st.columns(4)
@@ -194,7 +223,7 @@ with tab4:
         with col_c4:
             new_card_pay_day = st.number_input("引き落とし日（1〜31）", min_value=1, max_value=31, value=10)
             
-        submit_card = st.form_submit_button("カードをスプレッドシートに追加")
+        submit_card = st.form_submit_button("カードを追加")
         if submit_card:
             if new_card_name:
                 new_row = [new_card_name, new_card_close, new_card_pay_acc, new_card_pay_day]
@@ -204,10 +233,16 @@ with tab4:
             else:
                 st.error("カード名を入力してください。")
 
-    st.write("**現在のカードマスターデータ (cards)**")
-    st.dataframe(df_cards, use_container_width=True)
+    st.write("**カードマスターデータの編集・修正**")
+    if not df_cards.empty:
+        edited_cards = st.data_editor(df_cards, num_rows="dynamic", use_container_width=True, key="editor_cards")
+        if st.button("カードマスターの変更を保存する"):
+            if update_sheet_data("cards", edited_cards):
+                st.success("カードマスターを更新しました！")
+                st.rerun()
 
     st.markdown("---")
+    # 3. 収入元マスター
     st.subheader("3. 収入元・バイト先マスター設定")
     with st.form("job_form", clear_on_submit=True):
         col_j1, col_j2, col_j3, col_j4 = st.columns(4)
@@ -220,7 +255,7 @@ with tab4:
         with col_j4:
             new_job_wage = st.number_input("時給・単価（円）", value=1000, step=50)
             
-        submit_job = st.form_submit_button("収入元をスプレッドシートに追加")
+        submit_job = st.form_submit_button("収入元を追加")
         if submit_job:
             if new_job_name:
                 new_row = [new_job_name, new_job_close, new_job_pay_day, new_job_wage]
@@ -230,5 +265,10 @@ with tab4:
             else:
                 st.error("収入元名称を入力してください。")
 
-    st.write("**現在のバイト先マスターデータ (jobs)**")
-    st.dataframe(df_jobs, use_container_width=True)
+    st.write("**収入元マスターデータの編集・修正**")
+    if not df_jobs.empty:
+        edited_jobs = st.data_editor(df_jobs, num_rows="dynamic", use_container_width=True, key="editor_jobs")
+        if st.button("収入元マスターの変更を保存する"):
+            if update_sheet_data("jobs", edited_jobs):
+                st.success("収入元マスターを更新しました！")
+                st.rerun()
